@@ -1,34 +1,40 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Search, Filter, AlertTriangle, Package } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, Filter, AlertTriangle, Package, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 
-interface InventoryItem {
-  id: number;
+type InventoryStatus = 'in-stock' | 'low-stock' | 'out-of-stock';
+
+type InventoryItem = {
+  id: string;
   name: string;
   sku: string;
-  stock: number;
+  quantity: number;
   reorderLevel: number;
+  status: InventoryStatus;
   lastRestocked: string;
-  status: 'in-stock' | 'low-stock' | 'out-of-stock';
-}
+};
 
-const inventoryData: InventoryItem[] = [
-  { id: 1, name: 'Wireless Headphones', sku: 'WH-001', stock: 45, reorderLevel: 20, lastRestocked: '2025-11-28', status: 'in-stock' },
-  { id: 2, name: 'Smart Watch Pro', sku: 'SW-002', stock: 28, reorderLevel: 15, lastRestocked: '2025-11-25', status: 'in-stock' },
-  { id: 3, name: 'Laptop Stand', sku: 'LS-003', stock: 67, reorderLevel: 25, lastRestocked: '2025-11-30', status: 'in-stock' },
-  { id: 4, name: 'USB-C Cable', sku: 'UC-004', stock: 5, reorderLevel: 30, lastRestocked: '2025-11-20', status: 'low-stock' },
-  { id: 5, name: 'Mechanical Keyboard', sku: 'MK-005', stock: 32, reorderLevel: 15, lastRestocked: '2025-11-27', status: 'in-stock' },
-  { id: 6, name: 'Wireless Mouse', sku: 'WM-006', stock: 8, reorderLevel: 20, lastRestocked: '2025-11-22', status: 'low-stock' },
-  { id: 7, name: 'Phone Case', sku: 'PC-007', stock: 89, reorderLevel: 40, lastRestocked: '2025-12-01', status: 'in-stock' },
-  { id: 8, name: 'Portable Charger', sku: 'PC-008', stock: 0, reorderLevel: 20, lastRestocked: '2025-11-15', status: 'out-of-stock' },
-  { id: 9, name: 'Screen Protector', sku: 'SP-009', stock: 12, reorderLevel: 25, lastRestocked: '2025-11-18', status: 'low-stock' },
-  { id: 10, name: 'Bluetooth Speaker', sku: 'BS-010', stock: 38, reorderLevel: 15, lastRestocked: '2025-11-29', status: 'in-stock' },
-];
+type InventoryMetrics = {
+  totalUnits: number;
+  productCount: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+};
 
-function getStatusColor(status: InventoryItem['status']) {
+type InventoryResponse = {
+  metrics: InventoryMetrics;
+  items: InventoryItem[];
+};
+
+type FetchState =
+  | { status: 'idle' | 'loading' }
+  | { status: 'success'; data: InventoryResponse }
+  | { status: 'error'; message: string };
+
+function getStatusColor(status: InventoryStatus) {
   switch (status) {
     case 'in-stock':
       return 'bg-green-100 text-green-700';
@@ -42,14 +48,45 @@ function getStatusColor(status: InventoryItem['status']) {
 }
 
 function getStockPercentage(stock: number, reorderLevel: number) {
-  const percentage = (stock / (reorderLevel * 2)) * 100;
+  const denominator = reorderLevel * 2 || 1;
+  const percentage = (stock / denominator) * 100;
   return Math.min(percentage, 100);
 }
 
 export default function InventoryPage() {
-  const [inventory] = useState<InventoryItem[]>(inventoryData);
+  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | InventoryItem['status']>('all');
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchInventory = async () => {
+      setFetchState({ status: 'loading' });
+      try {
+        const response = await fetch('/api/inventory');
+        if (!response.ok) {
+          throw new Error('Failed to fetch inventory data.');
+        }
+        const data = (await response.json()) as InventoryResponse;
+        if (mounted) {
+          setFetchState({ status: 'success', data });
+        }
+      } catch (error) {
+        console.error('Failed to load inventory data', error);
+        if (mounted) {
+          setFetchState({ status: 'error', message: 'Unable to load inventory data.' });
+        }
+      }
+    };
+
+    fetchInventory();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const inventory = fetchState.status === 'success' ? fetchState.data.items : [];
+  const metrics = fetchState.status === 'success' ? fetchState.data.metrics : undefined;
 
   const filteredInventory = useMemo(() => {
     return inventory.filter((item) => {
@@ -61,9 +98,99 @@ export default function InventoryPage() {
     });
   }, [inventory, searchTerm, filterStatus]);
 
-  const lowStockCount = inventory.filter((item) => item.status === 'low-stock').length;
-  const outOfStockCount = inventory.filter((item) => item.status === 'out-of-stock').length;
-  const totalItems = inventory.reduce((sum, item) => sum + item.stock, 0);
+  const totalUnits = metrics?.totalUnits ?? 0;
+  const productCount = metrics?.productCount ?? 0;
+  const lowStockCount = metrics?.lowStockCount ?? 0;
+  const outOfStockCount = metrics?.outOfStockCount ?? 0;
+
+  const renderMetricValue = (value: string | number) => {
+    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+      return <span className="text-gray-500 text-sm">Loading…</span>;
+    }
+    if (fetchState.status === 'error') {
+      return <span className="text-red-500 text-sm">--</span>;
+    }
+    return value;
+  };
+
+  const renderTableBody = () => {
+    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+      return (
+        <tbody>
+          <tr>
+            <td colSpan={7} className="py-12">
+              <div className="flex items-center justify-center text-gray-500">
+                <Loader2 className="animate-spin mr-2" size={20} />
+                Loading inventory…
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      );
+    }
+
+    if (fetchState.status === 'error') {
+      return (
+        <tbody>
+          <tr>
+            <td colSpan={7} className="py-12">
+              <div className="text-center text-red-500">Failed to load inventory data.</div>
+            </td>
+          </tr>
+        </tbody>
+      );
+    }
+
+    if (filteredInventory.length === 0) {
+      return (
+        <tbody>
+          <tr>
+            <td colSpan={7} className="py-12">
+              <div className="text-center text-gray-500">No products match your filters.</div>
+            </td>
+          </tr>
+        </tbody>
+      );
+    }
+
+    return (
+      <tbody className="divide-y divide-gray-200">
+        {filteredInventory.map((item) => {
+          const stockPercentage = getStockPercentage(item.quantity, item.reorderLevel);
+          return (
+            <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+              <td className="px-6 py-4 text-gray-900">{item.name}</td>
+              <td className="px-6 py-4 text-gray-700">{item.sku || '—'}</td>
+              <td className="px-6 py-4 text-gray-900">{item.quantity} units</td>
+              <td className="px-6 py-4">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full ${
+                      item.status === 'in-stock'
+                        ? 'bg-green-500'
+                        : item.status === 'low-stock'
+                        ? 'bg-yellow-500'
+                        : 'bg-red-500'
+                    }`}
+                    style={{ width: `${stockPercentage}%` }}
+                  />
+                </div>
+              </td>
+              <td className="px-6 py-4 text-gray-700">{item.reorderLevel} units</td>
+              <td className="px-6 py-4 text-gray-700">
+                {new Date(item.lastRestocked).toLocaleDateString('en-GB')}
+              </td>
+              <td className="px-6 py-4">
+                <span className={`px-3 py-1 rounded-full text-sm capitalize ${getStatusColor(item.status)}`}>
+                  {item.status.replace('-', ' ')}
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    );
+  };
 
   return (
     <div className="p-8">
@@ -78,8 +205,10 @@ export default function InventoryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm mb-1">Total Items in Stock</p>
-                <p className="text-gray-900">{totalItems} units</p>
-                <p className="text-gray-500 text-sm mt-1">{inventory.length} products</p>
+                <p className="text-gray-900 text-lg font-semibold">{renderMetricValue(`${totalUnits} units`)}</p>
+                <p className="text-gray-500 text-sm mt-1">
+                  {renderMetricValue(`${productCount} product${productCount === 1 ? '' : 's'}`)}
+                </p>
               </div>
               <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
                 <Package size={24} />
@@ -93,7 +222,9 @@ export default function InventoryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm mb-1">Low Stock Items</p>
-                <p className="text-gray-900">{lowStockCount} products</p>
+                <p className="text-gray-900 text-lg font-semibold">
+                  {renderMetricValue(`${lowStockCount} product${lowStockCount === 1 ? '' : 's'}`)}
+                </p>
                 <p className="text-yellow-600 text-sm mt-1">Needs attention</p>
               </div>
               <div className="w-12 h-12 bg-yellow-100 text-yellow-600 rounded-lg flex items-center justify-center">
@@ -108,7 +239,9 @@ export default function InventoryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm mb-1">Out of Stock</p>
-                <p className="text-gray-900">{outOfStockCount} products</p>
+                <p className="text-gray-900 text-lg font-semibold">
+                  {renderMetricValue(`${outOfStockCount} product${outOfStockCount === 1 ? '' : 's'}`)}
+                </p>
                 <p className="text-red-600 text-sm mt-1">Restock immediately</p>
               </div>
               <div className="w-12 h-12 bg-red-100 text-red-600 rounded-lg flex items-center justify-center">
@@ -119,7 +252,7 @@ export default function InventoryPage() {
         </Card>
       </div>
 
-      {lowStockCount > 0 && (
+      {lowStockCount > 0 && fetchState.status === 'success' && (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
           <AlertTriangle size={20} className="text-yellow-600 mt-0.5" />
           <div className="flex-1">
@@ -176,39 +309,7 @@ export default function InventoryPage() {
                   <th className="px-6 py-3 text-left text-gray-700 text-sm">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredInventory.map((item) => {
-                  const stockPercentage = getStockPercentage(item.stock, item.reorderLevel);
-                  return (
-                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 text-gray-900">{item.name}</td>
-                      <td className="px-6 py-4 text-gray-700">{item.sku}</td>
-                      <td className="px-6 py-4 text-gray-900">{item.stock} units</td>
-                      <td className="px-6 py-4">
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full ${
-                              item.status === 'in-stock'
-                                ? 'bg-green-500'
-                                : item.status === 'low-stock'
-                                ? 'bg-yellow-500'
-                                : 'bg-red-500'
-                            }`}
-                            style={{ width: `${stockPercentage}%` }}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-700">{item.reorderLevel} units</td>
-                      <td className="px-6 py-4 text-gray-700">{item.lastRestocked}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-3 py-1 rounded-full text-sm capitalize ${getStatusColor(item.status)}`}>
-                          {item.status.replace('-', ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              {renderTableBody()}
             </table>
           </div>
         </CardContent>

@@ -14,6 +14,7 @@ const saleInclude = {
 } as const satisfies Prisma.SaleInclude;
 
 type SaleWithRelations = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
+type FormattedSale = ReturnType<typeof formatSale>;
 
 type ProductWithStock = {
   id: string;
@@ -58,6 +59,43 @@ function formatSale(sale: SaleWithRelations) {
   };
 }
 
+function buildRevenueOverview(sales: FormattedSale[]) {
+  const today = new Date();
+  const lastSevenDays = Array.from({ length: 7 }).map((_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: date.toLocaleDateString('en-US', { weekday: 'short' }),
+    };
+  });
+
+  const revenueByDate = sales.reduce((map, sale) => {
+    const saleDateKey = new Date(sale.createdAt).toISOString().slice(0, 10);
+    const currentTotal = map.get(saleDateKey) ?? 0;
+    map.set(saleDateKey, currentTotal + sale.totalAmount);
+    return map;
+  }, new Map<string, number>());
+
+  return lastSevenDays.map(({ key, label }) => ({
+    day: label,
+    revenue: Number((revenueByDate.get(key) ?? 0).toFixed(2)),
+  }));
+}
+
+function buildSalesSummary(sales: FormattedSale[]) {
+  const totalRevenue = sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const totalSales = sales.length;
+  const averageOrderValue = totalSales ? totalRevenue / totalSales : 0;
+
+  return {
+    totalRevenue,
+    totalSales,
+    averageOrderValue,
+    revenueOverview: buildRevenueOverview(sales),
+  };
+}
+
 function toCents(value: number) {
   return Math.round(value * 100);
 }
@@ -73,7 +111,10 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json({ sales: sales.map(formatSale) });
+    const formattedSales = sales.map(formatSale);
+    const summary = buildSalesSummary(formattedSales);
+
+    return NextResponse.json({ sales: formattedSales, summary });
   } catch (error) {
     console.error('Failed to fetch sales', error);
     return NextResponse.json({ error: 'Unable to fetch sales.' }, { status: 500 });
