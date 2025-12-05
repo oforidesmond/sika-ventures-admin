@@ -6,6 +6,7 @@ import { Loader2, Package, TrendingUp, ShoppingCart } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '@/components/ui/stat-card';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { describeChange, MetricChange } from '@/lib/metrics';
 
 type DashboardMetrics = {
   totalRevenue: number;
@@ -33,8 +34,16 @@ type Activity = {
   timestamp: string;
 };
 
+type DashboardMetricChanges = {
+  totalRevenue: MetricChange;
+  totalSales: MetricChange;
+  totalProducts: MetricChange;
+  todaysRevenue: MetricChange;
+};
+
 type DashboardResponse = {
   metrics: DashboardMetrics;
+  metricChanges: DashboardMetricChanges;
   weeklySalesOverview: WeeklyPoint[];
   quickStats: QuickStats;
   recentActivity: Activity[];
@@ -77,6 +86,7 @@ export default function DashboardPage() {
   });
 
   const metrics = dashboardData?.metrics;
+  const metricChanges = dashboardData?.metricChanges;
   const weeklySalesOverview = dashboardData?.weeklySalesOverview ?? [];
   const quickStats = dashboardData?.quickStats;
   const recentActivity = dashboardData?.recentActivity ?? [];
@@ -86,33 +96,61 @@ export default function DashboardPage() {
       {
         title: 'Total Revenue',
         value: metrics ? formatCurrency(metrics.totalRevenue) : '₵0.00',
-        change: '+12.5% from last week',
+        change: describeChange(metricChanges?.totalRevenue, {
+          descriptor: 'vs last week',
+          formatter: formatCurrency,
+        }).text,
+        changeType: describeChange(metricChanges?.totalRevenue, {
+          descriptor: 'vs last week',
+          formatter: formatCurrency,
+        }).type,
         icon: ShoppingCart,
         iconColor: 'bg-green-100 text-green-600',
       },
       {
         title: 'Total Sales',
         value: metrics ? metrics.totalSales.toLocaleString() : '0',
-        change: '+8.2% from last week',
+        change: describeChange(metricChanges?.totalSales, {
+          descriptor: 'vs last week',
+          formatter: (value) => value.toLocaleString(),
+        }).text,
+        changeType: describeChange(metricChanges?.totalSales, {
+          descriptor: 'vs last week',
+          formatter: (value) => value.toLocaleString(),
+        }).type,
         icon: ShoppingCart,
         iconColor: 'bg-blue-100 text-blue-600',
       },
       {
         title: 'Total Products',
         value: metrics ? metrics.totalProducts.toLocaleString() : '0',
-        change: '+5 new products',
+        change: describeChange(metricChanges?.totalProducts, {
+          descriptor: 'vs last week',
+          formatter: (value) => value.toLocaleString(),
+        }).text,
+        changeType: describeChange(metricChanges?.totalProducts, {
+          descriptor: 'vs last week',
+          formatter: (value) => value.toLocaleString(),
+        }).type,
         icon: Package,
         iconColor: 'bg-purple-100 text-purple-600',
       },
       {
         title: "Today's Revenue",
         value: metrics ? formatCurrency(metrics.todaysRevenue) : '₵0.00',
-        change: '+18.3% vs yesterday',
+        change: describeChange(metricChanges?.todaysRevenue, {
+          descriptor: 'vs same day last week',
+          formatter: formatCurrency,
+        }).text,
+        changeType: describeChange(metricChanges?.todaysRevenue, {
+          descriptor: 'vs same day last week',
+          formatter: formatCurrency,
+        }).type,
         icon: TrendingUp,
         iconColor: 'bg-orange-100 text-orange-600',
       },
     ],
-    [metrics],
+    [metrics, metricChanges],
   );
 
   const renderChart = () => {

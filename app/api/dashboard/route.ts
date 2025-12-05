@@ -31,6 +31,31 @@ function sevenDaysAgo() {
   return date;
 }
 
+function startOfPreviousWeek() {
+  const date = sevenDaysAgo();
+  date.setDate(date.getDate() - 7);
+  return date;
+}
+
+function startOfSameDayLastWeek() {
+  const date = startOfToday();
+  date.setDate(date.getDate() - 7);
+  return date;
+}
+
+function buildChangeSummary(current: number, previous: number) {
+  const delta = current - previous;
+  let percentage: number | null;
+
+  if (previous === 0) {
+    percentage = current === 0 ? 0 : null;
+  } else {
+    percentage = Number(((delta / Math.abs(previous)) * 100).toFixed(1));
+  }
+
+  return { delta, percentage };
+}
+
 function buildWeeklySalesOverview(sales: WeeklySale[]) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -81,43 +106,90 @@ function buildRecentActivity(sales: RecentSale[], products: ProductRecord[]) {
 
 export async function GET() {
   try {
-    const [salesAggregate, todaysRevenueAggregate, totalProducts, lowStockItems, weeklySales, recentSales, recentProducts] =
-      await Promise.all([
-        prisma.sale.aggregate({
-          _sum: { totalAmount: true },
-          _count: true,
-        }),
-        prisma.sale.aggregate({
-          where: { createdAt: { gte: startOfToday() } },
-          _sum: { totalAmount: true },
-        }),
-        prisma.product.count(),
-        prisma.stock.count({ where: { quantity: { lt: LOW_STOCK_THRESHOLD } } }),
-        prisma.sale.findMany({
-          where: { createdAt: { gte: sevenDaysAgo() } },
-          orderBy: { createdAt: 'asc' },
-          select: { createdAt: true, totalAmount: true },
-        }),
-        prisma.sale.findMany({
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          include: recentSaleInclude,
-        }),
-        prisma.product.findMany({
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-        }),
-      ]);
+    const startCurrentWeek = sevenDaysAgo();
+    const startPrevWeek = startOfPreviousWeek();
+    const todayStart = startOfToday();
+    const sameDayLastWeekStart = startOfSameDayLastWeek();
+    const sameDayLastWeekEnd = new Date(sameDayLastWeekStart);
+    sameDayLastWeekEnd.setDate(sameDayLastWeekEnd.getDate() + 1);
+
+    const [
+      salesAggregate,
+      todaysRevenueAggregate,
+      sameDayLastWeekAggregate,
+      totalProducts,
+      productsCreatedThisWeek,
+      lowStockItems,
+      weeklySales,
+      recentSales,
+      recentProducts,
+      currentWeekAggregate,
+      previousWeekAggregate,
+    ] = await Promise.all([
+      prisma.sale.aggregate({
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: todayStart } },
+        _sum: { totalAmount: true },
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: sameDayLastWeekStart, lt: sameDayLastWeekEnd } },
+        _sum: { totalAmount: true },
+      }),
+      prisma.product.count(),
+      prisma.product.count({
+        where: { createdAt: { gte: startCurrentWeek } },
+      }),
+      prisma.stock.count({ where: { quantity: { lt: LOW_STOCK_THRESHOLD } } }),
+      prisma.sale.findMany({
+        where: { createdAt: { gte: startCurrentWeek } },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true, totalAmount: true },
+      }),
+      prisma.sale.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: recentSaleInclude,
+      }),
+      prisma.product.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: startCurrentWeek } },
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: startPrevWeek, lt: startCurrentWeek } },
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+    ]);
 
     const totalRevenue = Number(salesAggregate._sum.totalAmount ?? 0);
     const totalSales = salesAggregate._count ?? 0;
     const todaysRevenue = Number(todaysRevenueAggregate._sum.totalAmount ?? 0);
+    const sameDayLastWeekRevenue = Number(sameDayLastWeekAggregate._sum.totalAmount ?? 0);
+    const currentWeekRevenue = Number(currentWeekAggregate._sum.totalAmount ?? 0);
+    const currentWeekSalesCount = currentWeekAggregate._count ?? 0;
+    const previousWeekRevenue = Number(previousWeekAggregate._sum.totalAmount ?? 0);
+    const previousWeekSalesCount = previousWeekAggregate._count ?? 0;
     const averageOrderValue = totalSales ? totalRevenue / totalSales : 0;
     const conversionRate =
       totalProducts > 0 ? Math.min(100, (totalSales / totalProducts) * 100) : totalSales > 0 ? 100 : 0;
+    const previousTotalProducts = Math.max(totalProducts - productsCreatedThisWeek, 0);
 
     const weeklySalesOverview = buildWeeklySalesOverview(weeklySales);
     const recentActivity = buildRecentActivity(recentSales, recentProducts);
+    const metricChanges = {
+      totalRevenue: buildChangeSummary(currentWeekRevenue, previousWeekRevenue),
+      totalSales: buildChangeSummary(currentWeekSalesCount, previousWeekSalesCount),
+      totalProducts: buildChangeSummary(totalProducts, previousTotalProducts),
+      todaysRevenue: buildChangeSummary(todaysRevenue, sameDayLastWeekRevenue),
+    };
 
     return NextResponse.json({
       metrics: {
@@ -126,6 +198,7 @@ export async function GET() {
         totalProducts,
         todaysRevenue,
       },
+      metricChanges,
       weeklySalesOverview,
       quickStats: {
         averageOrderValue,

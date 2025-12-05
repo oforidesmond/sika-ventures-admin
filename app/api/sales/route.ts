@@ -59,6 +59,38 @@ function formatSale(sale: SaleWithRelations) {
   };
 }
 
+function startOfToday() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function sevenDaysAgo() {
+  const date = new Date();
+  date.setDate(date.getDate() - 6);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function startOfPreviousWeek() {
+  const date = sevenDaysAgo();
+  date.setDate(date.getDate() - 7);
+  return date;
+}
+
+function buildChangeSummary(current: number, previous: number) {
+  const delta = current - previous;
+  let percentage: number | null;
+
+  if (previous === 0) {
+    percentage = current === 0 ? 0 : null;
+  } else {
+    percentage = Number(((delta / Math.abs(previous)) * 100).toFixed(1));
+  }
+
+  return { delta, percentage };
+}
+
 function buildRevenueOverview(sales: FormattedSale[]) {
   const today = new Date();
   const lastSevenDays = Array.from({ length: 7 }).map((_, index) => {
@@ -106,15 +138,45 @@ function centsToAmount(cents: number) {
 
 export async function GET() {
   try {
-    const sales = await prisma.sale.findMany({
-      include: saleInclude,
-      orderBy: { createdAt: 'desc' },
-    });
+    const startCurrentWeek = sevenDaysAgo();
+    const startPrevWeek = startOfPreviousWeek();
+
+    const [sales, currentWeekAggregate, previousWeekAggregate] = await Promise.all([
+      prisma.sale.findMany({
+        include: saleInclude,
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: startCurrentWeek } },
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      prisma.sale.aggregate({
+        where: { createdAt: { gte: startPrevWeek, lt: startCurrentWeek } },
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+    ]);
 
     const formattedSales = sales.map(formatSale);
     const summary = buildSalesSummary(formattedSales);
+    const currentWeekRevenue = Number(currentWeekAggregate._sum.totalAmount ?? 0);
+    const previousWeekRevenue = Number(previousWeekAggregate._sum.totalAmount ?? 0);
+    const currentWeekSalesCount = currentWeekAggregate._count ?? 0;
+    const previousWeekSalesCount = previousWeekAggregate._count ?? 0;
+    const currentWeekAov = currentWeekSalesCount ? currentWeekRevenue / currentWeekSalesCount : 0;
+    const previousWeekAov = previousWeekSalesCount ? previousWeekRevenue / previousWeekSalesCount : 0;
 
-    return NextResponse.json({ sales: formattedSales, summary });
+    const summaryWithChanges = {
+      ...summary,
+      changes: {
+        totalRevenue: buildChangeSummary(currentWeekRevenue, previousWeekRevenue),
+        totalSales: buildChangeSummary(currentWeekSalesCount, previousWeekSalesCount),
+        averageOrderValue: buildChangeSummary(currentWeekAov, previousWeekAov),
+      },
+    };
+
+    return NextResponse.json({ sales: formattedSales, summary: summaryWithChanges });
   } catch (error) {
     console.error('Failed to fetch sales', error);
     return NextResponse.json({ error: 'Unable to fetch sales.' }, { status: 500 });

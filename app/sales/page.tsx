@@ -6,6 +6,7 @@ import { Calendar, Download, FileText, Loader2, TrendingUp } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { describeChange, MetricChange } from '@/lib/metrics';
 
 type ApiSale = {
   id: string;
@@ -28,11 +29,18 @@ type ApiSale = {
   }[];
 };
 
+type SalesSummaryChanges = {
+  totalRevenue: MetricChange;
+  totalSales: MetricChange;
+  averageOrderValue: MetricChange;
+};
+
 type SalesSummary = {
   totalRevenue: number;
   totalSales: number;
   averageOrderValue: number;
   revenueOverview: { day: string; revenue: number }[];
+  changes: SalesSummaryChanges;
 };
 
 const currencyFormatter = new Intl.NumberFormat('en-GH', {
@@ -162,6 +170,18 @@ export default function SalesReportsPage() {
   const totalRevenue = summary?.totalRevenue ?? 0;
   const totalSales = summary?.totalSales ?? 0;
   const averageOrderValue = summary?.averageOrderValue ?? 0;
+  const totalRevenueChange = describeChange(summary?.changes?.totalRevenue, {
+    descriptor: 'vs last week',
+    formatter: formatCurrency,
+  });
+  const totalSalesChange = describeChange(summary?.changes?.totalSales, {
+    descriptor: 'vs last week',
+    formatter: (value) => value.toLocaleString(),
+  });
+  const averageOrderValueChange = describeChange(summary?.changes?.averageOrderValue, {
+    descriptor: 'vs last week',
+    formatter: formatCurrency,
+  });
 
   const handleExport = (type: 'csv' | 'pdf') => {
     alert(`Exporting to ${type.toUpperCase()}...`);
@@ -286,7 +306,13 @@ export default function SalesReportsPage() {
               <div>
                 <p className="text-gray-600 text-sm mb-1">Total Revenue</p>
                 <p className="text-gray-900 text-2xl font-semibold">{renderMetricValue(totalRevenue, true)}</p>
-                <p className="text-green-600 text-sm mt-1">+12.5% vs last period</p>
+                <p
+                  className={`text-sm mt-1 ${
+                    totalRevenueChange.type === 'positive' ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {totalRevenueChange.text}
+                </p>
               </div>
               <div className="w-12 h-12 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
                 <TrendingUp size={24} />
@@ -301,7 +327,13 @@ export default function SalesReportsPage() {
               <div>
                 <p className="text-gray-600 text-sm mb-1">Total Sales</p>
                 <p className="text-gray-900 text-2xl font-semibold">{renderMetricValue(totalSales)}</p>
-                <p className="text-green-600 text-sm mt-1">+8.2% vs last period</p>
+                <p
+                  className={`text-sm mt-1 ${
+                    totalSalesChange.type === 'positive' ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {totalSalesChange.text}
+                </p>
               </div>
               <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
                 <FileText size={24} />
@@ -316,7 +348,13 @@ export default function SalesReportsPage() {
               <div>
                 <p className="text-gray-600 text-sm mb-1">Avg. Order Value</p>
                 <p className="text-gray-900 text-2xl font-semibold">{renderMetricValue(averageOrderValue, true)}</p>
-                <p className="text-green-600 text-sm mt-1">+5.3% vs last period</p>
+                <p
+                  className={`text-sm mt-1 ${
+                    averageOrderValueChange.type === 'positive' ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {averageOrderValueChange.text}
+                </p>
               </div>
               <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center">
                 <TrendingUp size={24} />
