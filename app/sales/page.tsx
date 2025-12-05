@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Calendar, Download, FileText, Loader2, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Button } from '@/components/ui/button';
@@ -34,11 +35,6 @@ type SalesSummary = {
   revenueOverview: { day: string; revenue: number }[];
 };
 
-type FetchState =
-  | { status: 'idle' | 'loading' }
-  | { status: 'success'; sales: ApiSale[]; summary: SalesSummary }
-  | { status: 'error'; message: string };
-
 const currencyFormatter = new Intl.NumberFormat('en-GH', {
   style: 'currency',
   currency: 'GHS',
@@ -49,44 +45,31 @@ function formatCurrency(value: number) {
   return currencyFormatter.format(value).replace('GHS', '₵').trim();
 }
 
-const TRANSACTIONS_PER_PAGE = 10;
+const TRANSACTIONS_PER_PAGE = 6;
 
 export default function SalesReportsPage() {
   const [dateRange, setDateRange] = useState('last7days');
-  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchSales = async () => {
-      setFetchState({ status: 'loading' });
-      try {
-        const response = await fetch('/api/sales');
-        if (!response.ok) {
-          throw new Error('Failed to fetch sales data.');
-        }
-        const data = (await response.json()) as { sales: ApiSale[]; summary: SalesSummary };
-        if (mounted) {
-          setFetchState({ status: 'success', ...data });
-        }
-      } catch (error) {
-        console.error('Failed to load sales data', error);
-        if (mounted) {
-          setFetchState({ status: 'error', message: 'Unable to load sales data.' });
-        }
+  const {
+    data,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: ['sales'],
+    queryFn: async () => {
+      const response = await fetch('/api/sales');
+      if (!response.ok) {
+        throw new Error('Failed to fetch sales data.');
       }
-    };
+      return (await response.json()) as { sales: ApiSale[]; summary: SalesSummary };
+    },
+    retry: 1,
+  });
 
-    fetchSales();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const summary = fetchState.status === 'success' ? fetchState.summary : undefined;
-  const sales = fetchState.status === 'success' ? fetchState.sales : [];
+  const summary = data?.summary;
+  const sales = data?.sales ?? [];
 
   const transactions = useMemo(
     () =>
@@ -185,17 +168,17 @@ export default function SalesReportsPage() {
   };
 
   const renderMetricValue = (value: number, isCurrency = false) => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return <span className="text-gray-500 text-sm">Loading…</span>;
     }
-    if (fetchState.status === 'error') {
+    if (isError) {
       return <span className="text-red-500 text-sm">--</span>;
     }
     return isCurrency ? formatCurrency(value) : value.toLocaleString();
   };
 
   const renderChart = () => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <div className="flex items-center justify-center h-[300px] text-gray-500">
           <Loader2 className="animate-spin mr-2" size={20} />
@@ -204,7 +187,7 @@ export default function SalesReportsPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return (
         <div className="flex items-center justify-center h-[300px] text-red-500">
           Failed to load revenue overview.
@@ -233,7 +216,7 @@ export default function SalesReportsPage() {
   };
 
   const renderTransactions = () => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <div className="flex items-center justify-center py-12 text-gray-500">
           <Loader2 className="animate-spin mr-2" size={20} />
@@ -242,7 +225,7 @@ export default function SalesReportsPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return (
         <div className="flex items-center justify-center py-12 text-red-500">
           Failed to load sales transactions.

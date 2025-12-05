@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Edit, Trash2, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -16,15 +17,17 @@ interface Product {
   stockQuantity: number;
 }
 
+interface ProductsResponse {
+  products: Product[];
+}
+
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     sku: '',
@@ -32,41 +35,29 @@ export default function ProductsPage() {
     sellingPrice: '',
     stock: '',
   });
-
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        setIsLoading(true);
-        const response = await fetch('/api/products');
-        if (!response.ok) {
-          throw new Error('Failed to load products');
-        }
-        const data = await response.json();
-        setProducts(data.products ?? []);
-        setError(null);
-      } catch (err) {
-        console.error(err);
-        setError('Unable to load products. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchProducts();
-  }, []);
-
-  const refreshProducts = async () => {
-    try {
+  const queryClient = useQueryClient();
+  const {
+    data,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: ['products'],
+    queryFn: async () => {
       const response = await fetch('/api/products');
       if (!response.ok) {
-        throw new Error('Failed to refresh products');
+        throw new Error('Failed to load products');
       }
-      const data = await response.json();
-      setProducts(data.products ?? []);
-    } catch (err) {
-      console.error(err);
-      setError('Unable to refresh products.');
-    }
+      return (await response.json()) as ProductsResponse;
+    },
+    retry: 1,
+  });
+
+  const products = data?.products ?? [];
+  const updateProductsCache = (updater: (prev: Product[]) => Product[]) => {
+    queryClient.setQueryData<ProductsResponse>(['products'], (prev) => {
+      const currentProducts = prev?.products ?? [];
+      return { products: updater(currentProducts) };
+    });
   };
 
   const itemsPerPage = 6;
@@ -108,6 +99,7 @@ export default function ProductsPage() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
+    setActionError(null);
 
     const payload = {
       name: formData.name,
@@ -133,16 +125,17 @@ export default function ProductsPage() {
         throw new Error(data.error || 'Failed to save product');
       }
 
-      if (editingProduct) {
-        setProducts((prev) => prev.map((product) => (product.id === data.product.id ? data.product : product)));
-      } else {
-        setProducts((prev) => [data.product, ...prev]);
-      }
+      updateProductsCache((prev) => {
+        if (editingProduct) {
+          return prev.map((product) => (product.id === data.product.id ? data.product : product));
+        }
+        return [data.product, ...prev];
+      });
 
       handleCloseModal();
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : 'Unable to save product.');
+      setActionError(err instanceof Error ? err.message : 'Unable to save product.');
     } finally {
       setIsSubmitting(false);
     }
@@ -159,10 +152,10 @@ export default function ProductsPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to delete product');
       }
-      setProducts((prev) => prev.filter((product) => product.id !== id));
+      updateProductsCache((prev) => prev.filter((product) => product.id !== id));
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : 'Unable to delete product.');
+      setActionError(err instanceof Error ? err.message : 'Unable to delete product.');
     }
   };
 
@@ -204,7 +197,11 @@ export default function ProductsPage() {
 
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            {error && <p className="px-6 py-3 text-red-600 text-sm">{error}</p>}
+            {(actionError || isError) && (
+              <p className="px-6 py-3 text-red-600 text-sm">
+                {actionError ?? 'Unable to load products. Please try again.'}
+              </p>
+            )}
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -217,7 +214,7 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {isLoading ? (
+                {isPending ? (
                   <tr>
                     <td className="px-6 py-4 text-gray-500" colSpan={6}>
                       Loading products...
@@ -226,7 +223,7 @@ export default function ProductsPage() {
                 ) : paginatedProducts.length === 0 ? (
                   <tr>
                     <td className="px-6 py-4 text-gray-500" colSpan={6}>
-                      No products found.
+                      {isError ? 'Failed to load products.' : 'No products found.'}
                     </td>
                   </tr>
                 ) : (

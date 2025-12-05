@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode, useEffect, useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from './sidebar';
 import TopBar from './top-bar';
@@ -13,6 +14,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const isPublicRoute = PUBLIC_PATHS.includes(pathname ?? '/');
   const [isCheckingAuth, setIsCheckingAuth] = useState(!isPublicRoute);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 2 * 60 * 1000,
+            retry: 1,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
 
   useEffect(() => {
     if (isPublicRoute) {
@@ -34,33 +47,33 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setIsCheckingAuth(false);
   }, [isPublicRoute, router]);
 
-  if (isPublicRoute) {
-    return <>{children}</>;
-  }
+  let content: ReactNode;
 
-  if (isCheckingAuth) {
-    return (
+  if (isPublicRoute) {
+    content = children;
+  } else if (isCheckingAuth) {
+    content = (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <p className="text-gray-600 text-sm">Checking authentication…</p>
       </div>
     );
-  }
-
-  if (!isAuthenticated) {
-    return (
+  } else if (!isAuthenticated) {
+    content = (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <p className="text-gray-600 text-sm">Redirecting to login…</p>
       </div>
     );
+  } else {
+    content = (
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <TopBar />
+          <main className="flex-1 overflow-y-auto bg-gray-50">{children}</main>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar />
-        <main className="flex-1 overflow-y-auto bg-gray-50">{children}</main>
-      </div>
-    </div>
-  );
+  return <QueryClientProvider client={queryClient}>{content}</QueryClientProvider>;
 }

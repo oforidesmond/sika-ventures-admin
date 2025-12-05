@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search, Filter, AlertTriangle, Package, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -29,11 +30,6 @@ type InventoryResponse = {
   items: InventoryItem[];
 };
 
-type FetchState =
-  | { status: 'idle' | 'loading' }
-  | { status: 'success'; data: InventoryResponse }
-  | { status: 'error'; message: string };
-
 function getStatusColor(status: InventoryStatus) {
   switch (status) {
     case 'in-stock':
@@ -54,39 +50,26 @@ function getStockPercentage(stock: number, reorderLevel: number) {
 }
 
 export default function InventoryPage() {
-  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | InventoryItem['status']>('all');
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchInventory = async () => {
-      setFetchState({ status: 'loading' });
-      try {
-        const response = await fetch('/api/inventory');
-        if (!response.ok) {
-          throw new Error('Failed to fetch inventory data.');
-        }
-        const data = (await response.json()) as InventoryResponse;
-        if (mounted) {
-          setFetchState({ status: 'success', data });
-        }
-      } catch (error) {
-        console.error('Failed to load inventory data', error);
-        if (mounted) {
-          setFetchState({ status: 'error', message: 'Unable to load inventory data.' });
-        }
+  const {
+    data,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: ['inventory'],
+    queryFn: async () => {
+      const response = await fetch('/api/inventory');
+      if (!response.ok) {
+        throw new Error('Failed to fetch inventory data.');
       }
-    };
+      return (await response.json()) as InventoryResponse;
+    },
+    retry: 1,
+  });
 
-    fetchInventory();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const inventory = fetchState.status === 'success' ? fetchState.data.items : [];
-  const metrics = fetchState.status === 'success' ? fetchState.data.metrics : undefined;
+  const inventory = data?.items ?? [];
+  const metrics = data?.metrics;
 
   const filteredInventory = useMemo(() => {
     return inventory.filter((item) => {
@@ -104,17 +87,17 @@ export default function InventoryPage() {
   const outOfStockCount = metrics?.outOfStockCount ?? 0;
 
   const renderMetricValue = (value: string | number) => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return <span className="text-gray-500 text-sm">Loading…</span>;
     }
-    if (fetchState.status === 'error') {
+    if (isError) {
       return <span className="text-red-500 text-sm">--</span>;
     }
     return value;
   };
 
   const renderTableBody = () => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <tbody>
           <tr>
@@ -129,7 +112,7 @@ export default function InventoryPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return (
         <tbody>
           <tr>
@@ -252,7 +235,7 @@ export default function InventoryPage() {
         </Card>
       </div>
 
-      {lowStockCount > 0 && fetchState.status === 'success' && (
+      {lowStockCount > 0 && data && (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
           <AlertTriangle size={20} className="text-yellow-600 mt-0.5" />
           <div className="flex-1">

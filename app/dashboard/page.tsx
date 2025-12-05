@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Loader2, Package, TrendingUp, ShoppingCart } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '@/components/ui/stat-card';
@@ -39,11 +40,6 @@ type DashboardResponse = {
   recentActivity: Activity[];
 };
 
-type FetchState =
-  | { status: 'idle' | 'loading' }
-  | { status: 'success'; data: DashboardResponse }
-  | { status: 'error'; message: string };
-
 const currencyFormatter = new Intl.NumberFormat('en-GH', {
   style: 'currency',
   currency: 'GHS',
@@ -64,36 +60,22 @@ function formatTimestamp(timestamp: string) {
 }
 
 export default function DashboardPage() {
-  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchDashboard = async () => {
-      setFetchState({ status: 'loading' });
-      try {
-        const response = await fetch('/api/dashboard');
-        if (!response.ok) {
-          throw new Error('Failed to fetch dashboard data.');
-        }
-        const data = (await response.json()) as DashboardResponse;
-        if (mounted) {
-          setFetchState({ status: 'success', data });
-        }
-      } catch (error) {
-        console.error('Failed to load dashboard data', error);
-        if (mounted) {
-          setFetchState({ status: 'error', message: 'Unable to load dashboard data.' });
-        }
+  const {
+    data: dashboardData,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: async () => {
+      const response = await fetch('/api/dashboard');
+      if (!response.ok) {
+        throw new Error('Unable to load dashboard data.');
       }
-    };
+      return (await response.json()) as DashboardResponse;
+    },
+    retry: 1,
+  });
 
-    fetchDashboard();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const dashboardData = fetchState.status === 'success' ? fetchState.data : undefined;
   const metrics = dashboardData?.metrics;
   const weeklySalesOverview = dashboardData?.weeklySalesOverview ?? [];
   const quickStats = dashboardData?.quickStats;
@@ -134,7 +116,7 @@ export default function DashboardPage() {
   );
 
   const renderChart = () => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <div className="flex items-center justify-center h-[300px] text-gray-500">
           <Loader2 className="animate-spin mr-2" size={20} />
@@ -143,7 +125,7 @@ export default function DashboardPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return (
         <div className="flex items-center justify-center h-[300px] text-red-500">
           Failed to load weekly sales overview.
@@ -197,7 +179,7 @@ export default function DashboardPage() {
       },
     ];
 
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <div className="flex items-center justify-center py-8 text-gray-500">
           <Loader2 className="animate-spin mr-2" size={20} />
@@ -206,7 +188,7 @@ export default function DashboardPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return <div className="text-red-500 text-center py-4">Failed to load quick stats.</div>;
     }
 
@@ -223,7 +205,7 @@ export default function DashboardPage() {
   };
 
   const renderRecentActivity = () => {
-    if (fetchState.status === 'loading' || fetchState.status === 'idle') {
+    if (isPending) {
       return (
         <div className="flex items-center justify-center py-12 text-gray-500">
           <Loader2 className="animate-spin mr-2" size={20} />
@@ -232,7 +214,7 @@ export default function DashboardPage() {
       );
     }
 
-    if (fetchState.status === 'error') {
+    if (isError) {
       return (
         <div className="flex items-center justify-center py-12 text-red-500">Failed to load recent activity.</div>
       );
