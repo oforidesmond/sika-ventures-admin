@@ -1,0 +1,76 @@
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+function formatProduct(product: any) {
+  return {
+    id: product.id,
+    name: product.name,
+    sku: product.sku ?? '',
+    costPrice: Number(product.cost ?? 0),
+    sellingPrice: Number(product.price ?? 0),
+    stockQuantity: product.stock?.quantity ?? 0,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+  };
+}
+
+export async function GET() {
+  try {
+    const products = await prisma.product.findMany({
+      include: { stock: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return NextResponse.json({ products: products.map(formatProduct) });
+  } catch (error) {
+    console.error('Failed to fetch products', error);
+    return NextResponse.json({ error: 'Unable to fetch products.' }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const { name, sku, costPrice, sellingPrice, stock } = await request.json();
+
+    if (!name || !sku) {
+      return NextResponse.json({ error: 'Name and SKU are required.' }, { status: 400 });
+    }
+
+    if (costPrice === undefined || sellingPrice === undefined) {
+      return NextResponse.json({ error: 'Cost and selling price are required.' }, { status: 400 });
+    }
+
+    const parsedCost = Number(costPrice);
+    const parsedSelling = Number(sellingPrice);
+    const parsedStock = stock !== undefined ? Number(stock) : 0;
+
+    if ([parsedCost, parsedSelling].some((value) => Number.isNaN(value))) {
+      return NextResponse.json({ error: 'Cost and selling price must be numbers.' }, { status: 400 });
+    }
+
+    if (Number.isNaN(parsedStock)) {
+      return NextResponse.json({ error: 'Stock must be a number.' }, { status: 400 });
+    }
+
+    const product = await prisma.product.create({
+      data: {
+        name,
+        sku,
+        cost: parsedCost,
+        price: parsedSelling,
+        stock: {
+          create: {
+            quantity: parsedStock,
+          },
+        },
+      },
+      include: { stock: true },
+    });
+
+    return NextResponse.json({ product: formatProduct(product) }, { status: 201 });
+  } catch (error: any) {
+    console.error('Failed to create product', error);
+    const message = error?.meta?.target?.includes('sku') ? 'SKU must be unique.' : 'Unable to create product.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
