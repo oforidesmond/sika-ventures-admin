@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Edit, Trash2, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,60 @@ export default function ProductsPage() {
     sellingPrice: '',
     stock: '',
   });
+  const skuInputRef = useRef<HTMLInputElement>(null);
+  const scannerBufferRef = useRef('');
+  const scannerTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+
+    skuInputRef.current?.focus({ preventScroll: true });
+
+    const resetScannerState = () => {
+      if (scannerTimeoutRef.current) {
+        window.clearTimeout(scannerTimeoutRef.current);
+        scannerTimeoutRef.current = null;
+      }
+      scannerBufferRef.current = '';
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        if (scannerBufferRef.current) {
+          setFormData((prev) => ({ ...prev, sku: scannerBufferRef.current }));
+          skuInputRef.current?.focus({ preventScroll: true });
+        }
+        resetScannerState();
+        return;
+      }
+
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        scannerBufferRef.current += event.key;
+        if (scannerTimeoutRef.current) {
+          window.clearTimeout(scannerTimeoutRef.current);
+        }
+        scannerTimeoutRef.current = window.setTimeout(() => {
+          resetScannerState();
+        }, 100);
+      } else {
+        resetScannerState();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      resetScannerState();
+    };
+  }, [isModalOpen, setFormData]);
   const queryClient = useQueryClient();
   const {
     data,
@@ -316,8 +370,8 @@ export default function ProductsPage() {
             label="Product Name"
             type="text"
             value={formData.name}
-            onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-            placeholder="e.g., Wireless Headphones"
+            onChange={(event) => setFormData({ ...formData, name: event.target.value.toUpperCase() })}
+            placeholder="e.g., POWERZONE BIG"
             required
           />
 
@@ -327,7 +381,8 @@ export default function ProductsPage() {
               type="text"
               value={formData.sku}
               onChange={(event) => setFormData({ ...formData, sku: event.target.value })}
-              placeholder="e.g., WH-001"
+              placeholder="e.g., PZB-001"
+              ref={skuInputRef}
               required
             />
             <Input
