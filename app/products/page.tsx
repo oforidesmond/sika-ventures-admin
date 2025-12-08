@@ -19,11 +19,16 @@ interface Product {
 
 interface ProductsResponse {
   products: Product[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 export default function ProductsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,15 +94,33 @@ export default function ProductsPage() {
       resetScannerState();
     };
   }, [isModalOpen, setFormData]);
+
+  useEffect(() => {
+    const handler = window.setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(handler);
+    };
+  }, [searchTerm]);
   const queryClient = useQueryClient();
   const {
     data,
     isPending,
     isError,
-  } = useQuery({
-    queryKey: ['products'],
+  } = useQuery<ProductsResponse, Error>({
+    queryKey: ['products', currentPage, debouncedSearch],
     queryFn: async () => {
-      const response = await fetch('/api/products');
+      const params = new URLSearchParams();
+      params.set('page', String(currentPage));
+      params.set('pageSize', '25');
+      if (debouncedSearch) {
+        params.set('search', debouncedSearch);
+      }
+
+      const response = await fetch(`/api/products?${params.toString()}`);
       if (!response.ok) {
         throw new Error('Failed to load products');
       }
@@ -107,20 +130,12 @@ export default function ProductsPage() {
   });
 
   const products = data?.products ?? [];
-  const updateProductsCache = (updater: (prev: Product[]) => Product[]) => {
-    queryClient.setQueryData<ProductsResponse>(['products'], (prev) => {
-      const currentProducts = prev?.products ?? [];
-      return { products: updater(currentProducts) };
-    });
-  };
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+  const pageSize = data?.pageSize ?? 25;
 
-  const itemsPerPage = 6;
-  const filteredProducts = products.filter((product) =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage) || 1;
-  const paginatedProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const startItem = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endItem = Math.min(currentPage * pageSize, total);
 
   const handleOpenModal = (product?: Product) => {
     if (product) {
@@ -179,12 +194,7 @@ export default function ProductsPage() {
         throw new Error(data.error || 'Failed to save product');
       }
 
-      updateProductsCache((prev) => {
-        if (editingProduct) {
-          return prev.map((product) => (product.id === data.product.id ? data.product : product));
-        }
-        return [data.product, ...prev];
-      });
+      await queryClient.invalidateQueries({ queryKey: ['products'] });
 
       handleCloseModal();
     } catch (err) {
@@ -206,7 +216,7 @@ export default function ProductsPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to delete product');
       }
-      updateProductsCache((prev) => prev.filter((product) => product.id !== id));
+      await queryClient.invalidateQueries({ queryKey: ['products'] });
     } catch (err) {
       console.error(err);
       setActionError(err instanceof Error ? err.message : 'Unable to delete product.');
@@ -237,7 +247,6 @@ export default function ProductsPage() {
                 value={searchTerm}
                 onChange={(event) => {
                   setSearchTerm(event.target.value);
-                  setCurrentPage(1);
                 }}
                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -274,14 +283,14 @@ export default function ProductsPage() {
                       Loading products...
                     </td>
                   </tr>
-                ) : paginatedProducts.length === 0 ? (
+                ) : products.length === 0 ? (
                   <tr>
                     <td className="px-6 py-4 text-gray-500" colSpan={6}>
                       {isError ? 'Failed to load products.' : 'No products found.'}
                     </td>
                   </tr>
                 ) : (
-                  paginatedProducts.map((product) => (
+                  products.map((product: Product) => (
                     <tr key={product.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 text-gray-900">{product.name}</td>
                       <td className="px-6 py-4 text-gray-700">{product.sku}</td>
@@ -321,30 +330,25 @@ export default function ProductsPage() {
 
           <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
             <p className="text-gray-600 text-sm">
-              Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredProducts.length)} of {filteredProducts.length} products
+              {total === 0
+                ? 'No products to display'
+                : `Showing ${startItem} to ${endItem} of ${total} products`}
             </p>
             <div className="flex gap-2">
               <Button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} variant="outline" size="sm">
                 Previous
               </Button>
-              {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
-                <Button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  variant={currentPage === page ? 'primary' : 'outline'}
-                  size="sm"
-                >
-                  {page}
-                </Button>
-              ))}
               <Button
                 onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
+                disabled={currentPage === totalPages || total === 0}
                 variant="outline"
                 size="sm"
               >
                 Next
               </Button>
+              <span className="text-sm text-gray-600">
+                Page {total === 0 ? 0 : currentPage} of {totalPages}
+              </span>
             </div>
           </div>
         </CardContent>

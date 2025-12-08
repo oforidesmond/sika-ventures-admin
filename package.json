@@ -6,7 +6,8 @@
     "dev": "next dev -p 3002",
     "build": "next build",
     "start": "next start -p 3002",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "seed:inventory": "node prisma/seedInventory.js"
   },
   "dependencies": {
     "@prisma/client": "^4.16.2",

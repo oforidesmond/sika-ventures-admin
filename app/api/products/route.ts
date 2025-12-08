@@ -14,14 +14,47 @@ function formatProduct(product: any) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const products = await prisma.product.findMany({
-      include: { stock: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { searchParams } = new URL(request.url);
 
-    return NextResponse.json({ products: products.map(formatProduct) });
+    const pageParam = Number(searchParams.get('page') ?? '1');
+    const pageSizeParam = Number(searchParams.get('pageSize') ?? '25');
+    const search = (searchParams.get('search') ?? '').trim();
+
+    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const rawPageSize = Number.isFinite(pageSizeParam) && pageSizeParam > 0 ? pageSizeParam : 25;
+    const pageSize = Math.min(Math.max(rawPageSize, 1), 100);
+
+    const where = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const [products, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        include: { stock: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+
+    return NextResponse.json({
+      products: products.map(formatProduct),
+      page,
+      pageSize,
+      total,
+      totalPages,
+    });
   } catch (error) {
     console.error('Failed to fetch products', error);
     return NextResponse.json({ error: 'Unable to fetch products.' }, { status: 500 });
