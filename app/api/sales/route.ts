@@ -21,7 +21,7 @@ type ProductWithStock = {
   name: string;
   price: Prisma.Decimal;
   stock: {
-    quantity: number;
+    quantity: Prisma.Decimal;
   } | null;
 };
 
@@ -45,7 +45,7 @@ function formatSale(sale: SaleWithRelations) {
     items: sale.items.map((item) => ({
       id: item.id,
       productId: item.productId,
-      quantity: item.quantity,
+      quantity: Number(item.quantity),
       price: Number(item.price),
       total: Number(item.total),
       product: item.product
@@ -219,8 +219,8 @@ export async function POST(request: Request) {
       }
 
       const quantity = Number(item.quantity);
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        return NextResponse.json({ error: `Item ${index + 1} quantity must be a positive integer.` }, { status: 400 });
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return NextResponse.json({ error: `Item ${index + 1} quantity must be a positive number.` }, { status: 400 });
       }
 
       let priceOverride: number | undefined;
@@ -269,7 +269,7 @@ export async function POST(request: Request) {
         throw new Error(`Product "${product.name}" has no stock record.`);
       }
 
-      const available = product.stock.quantity;
+      const available = Number(product.stock.quantity);
       if (item.quantity > available) {
         throw new Error(`Insufficient stock for ${product.name}. Available: ${available}`);
       }
@@ -282,7 +282,7 @@ export async function POST(request: Request) {
       }
 
       const priceInCents = toCents(unitPrice);
-      const lineTotalInCents = priceInCents * item.quantity;
+      const lineTotalInCents = Math.round(priceInCents * item.quantity);
       subtotalInCents += lineTotalInCents;
 
       return {
@@ -302,7 +302,7 @@ export async function POST(request: Request) {
       async (tx: Prisma.TransactionClient) => {
         for (const item of itemsPayload) {
           const stock = await tx.stock.findUnique({ where: { productId: item.productId } });
-          if (!stock || stock.quantity < item.quantity) {
+          if (!stock || Number(stock.quantity) < item.quantity) {
             throw new Error('Stock levels changed. Please refresh and try again.');
           }
         }

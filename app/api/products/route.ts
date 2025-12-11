@@ -8,7 +8,7 @@ function formatProduct(product: any) {
     sku: product.sku ?? '',
     costPrice: Number(product.cost ?? 0),
     sellingPrice: Number(product.price ?? 0),
-    stockQuantity: product.stock?.quantity ?? 0,
+    stockQuantity: Number(product.stock?.quantity ?? 0),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
@@ -81,8 +81,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cost and selling price must be numbers.' }, { status: 400 });
     }
 
-    if (Number.isNaN(parsedStock)) {
-      return NextResponse.json({ error: 'Stock must be a number.' }, { status: 400 });
+    if (Number.isNaN(parsedStock) || parsedStock < 0) {
+      return NextResponse.json({ error: 'Stock must be a non-negative number.' }, { status: 400 });
     }
 
     const product = await prisma.product.create({
