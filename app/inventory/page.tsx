@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Filter, AlertTriangle, Package, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,8 @@ function getStockPercentage(stock: number, reorderLevel: number) {
 export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | InventoryItem['status']>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
   const {
     data,
     isPending,
@@ -80,6 +82,27 @@ export default function InventoryPage() {
       return matchesSearch && matchesFilter;
     });
   }, [inventory, searchTerm, filterStatus]);
+
+  // Pagination logic
+  const totalItems = filteredInventory.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredInventory.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Change page
+  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
+
+  // Format number with thousand separators and max 2 decimal places
+  const formatNumber = (num: number): string =>
+    new Intl.NumberFormat('en-US', {
+      maximumFractionDigits: 2,
+    }).format(num);
 
   const totalUnits = metrics?.totalUnits ?? 0;
   const productCount = metrics?.productCount ?? 0;
@@ -138,7 +161,7 @@ export default function InventoryPage() {
 
     return (
       <tbody className="divide-y divide-gray-200">
-        {filteredInventory.map((item) => {
+        {currentItems.map((item) => {
           const stockPercentage = getStockPercentage(item.quantity, item.reorderLevel);
           return (
             <tr key={item.id} className="hover:bg-gray-50 transition-colors">
@@ -188,7 +211,9 @@ export default function InventoryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm mb-1">Total Items in Stock</p>
-                <p className="text-gray-900 text-lg font-semibold">{renderMetricValue(`${totalUnits} units`)}</p>
+                <p className="text-gray-900 text-lg font-semibold">
+                  {renderMetricValue(`${formatNumber(totalUnits)} units`)}
+                </p>
                 <p className="text-gray-500 text-sm mt-1">
                   {renderMetricValue(`${productCount} product${productCount === 1 ? '' : 's'}`)}
                 </p>
@@ -294,6 +319,62 @@ export default function InventoryPage() {
               </thead>
               {renderTableBody()}
             </table>
+            
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
+                <div className="text-sm text-gray-600">
+                  Showing <span className="font-medium">{Math.min(indexOfFirstItem + 1, totalItems)}</span> to{' '}
+                  <span className="font-medium">
+                    {Math.min(indexOfLastItem, totalItems)}
+                  </span>{' '}
+                  of <span className="font-medium">{totalItems}</span> results
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => paginate(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className={`px-3 py-1 rounded-md ${currentPage === 1 ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-100'}`}
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => paginate(pageNum)}
+                        className={`w-10 h-10 rounded-md flex items-center justify-center ${
+                          currentPage === pageNum
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => paginate(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className={`px-3 py-1 rounded-md ${
+                      currentPage === totalPages ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

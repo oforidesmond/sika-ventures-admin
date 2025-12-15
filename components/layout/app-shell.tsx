@@ -47,6 +47,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setIsCheckingAuth(false);
   }, [isPublicRoute, router]);
 
+  // Handle browser/tab close
+  useEffect(() => {
+    if (isPublicRoute || typeof window === 'undefined') return;
+
+    const handleBeforeUnload = () => {
+      // Clear auth token from localStorage when the page is being unloaded
+      localStorage.removeItem('authToken');
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    // Cleanup the event listener when the component unmounts
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isPublicRoute]);
+
   let content: ReactNode;
 
   if (isPublicRoute) {

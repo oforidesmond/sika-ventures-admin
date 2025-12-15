@@ -38,7 +38,15 @@ export async function GET() {
     });
 
     const items: InventoryItem[] = products.map((product: ProductWithStock) => {
-      const quantity = product.stock?.quantity ?? 0;
+      const rawQuantity = product.stock?.quantity ?? 0;
+      const quantity =
+        typeof rawQuantity === 'number'
+          ? rawQuantity
+          : typeof rawQuantity === 'string'
+            ? Number(rawQuantity)
+            : typeof (rawQuantity as { toNumber?: () => number }).toNumber === 'function'
+              ? (rawQuantity as { toNumber: () => number }).toNumber()
+              : Number(rawQuantity);
       const status = determineStatus(quantity);
       const reorderLevel = Math.max(REORDER_LEVEL_DEFAULT, Math.round(quantity * 0.5));
 
@@ -46,7 +54,7 @@ export async function GET() {
         id: product.id,
         name: product.name,
         sku: product.sku ?? '',
-        quantity,
+        quantity: Number.isFinite(quantity) ? quantity : 0,
         reorderLevel,
         status,
         lastRestocked: product.stock?.lastUpdatedAt?.toISOString() ?? product.updatedAt.toISOString(),
